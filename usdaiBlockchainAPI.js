@@ -26,6 +26,25 @@
   // The API returns `time` in Unix SECONDS, but `new Date()` needs
   // MILLISECONDS. Normalize everything to ms (or null) here so the
   // UI never renders 1970 dates again.
+  // Incorporation address per token.
+  // Any send FROM this address is a mint, no matter whose history views it. Falls back to sniffing the feed when unreachable.
+  const incorporationAddrCache = {};
+  async function getIncorporationAddress(token) {
+    if (token in incorporationAddrCache) return incorporationAddrCache[token];
+    try {
+      const res = await fetch(`${TOKEN_API_BASE}/tokenInfo/${token}`);
+      if (res.ok) {
+        const info = await res.json();
+        incorporationAddrCache[token] = info.incorporationAddress || null;
+        return incorporationAddrCache[token];
+      }
+    } catch (_) {
+      // fall through to feed sniffing
+    }
+    incorporationAddrCache[token] = null;
+    return null;
+  }
+
   function normalizeTimestamp(v) {
     if (v === null || v === undefined || v === '') return null;
     if (typeof v === 'number' && Number.isFinite(v)) {
@@ -66,9 +85,11 @@
         const txs = dedupeTxs(Array.isArray(data)
           ? data
           : data.transactions || data.txs || data.data || []);
-        const isIncorporation = txs.some(
-          (tx) => (tx.transferType || tx.type) === 'infiniteTokenIncorporation'
-        );
+        const isIncorporation =
+          (await getIncorporationAddress(USDAI_TOKEN)) === floAddress ||
+          txs.some(
+            (tx) => (tx.transferType || tx.type) === 'infiniteTokenIncorporation'
+          );
         let balance = 0;
         for (const tx of txs) {
           if ((tx.transferType || tx.type) === 'infiniteTokenIncorporation') continue;
@@ -145,12 +166,25 @@
         ? data
         : data.transactions || data.txs || data.data || []);
 
+      // Incorporation-aware history: any send FROM the token's
+      // incorporation address is a mint (creation), no matter whose
+      // history views it. Everywhere else, sent/received keeps meaning.
+      const incorpAddr = await getIncorporationAddress(USDAI_TOKEN);
+      const isIncorporator =
+        (incorpAddr && incorpAddr === floAddress) ||
+        txs.some(
+          (t) => (t.transferType || t.type) === 'infiniteTokenIncorporation'
+        );
+
       const transactions = txs.slice(0, limit).map((tx) => {
         const amt = Number(tx.tokenAmount || tx.amount || 0);
         const dest = tx.receiverAddress || tx.to || tx.destAddress;
         const sender = tx.senderAddress || tx.from || tx.sender;
-        const isMint = (tx.transferType || tx.type) === 'infiniteTokenIncorporation';
-        const isSent = !isMint && sender === floAddress;
+        const isSent = sender === floAddress;
+        const isMint =
+          (tx.transferType || tx.type) === 'infiniteTokenIncorporation' ||
+          (incorpAddr && sender === incorpAddr) ||
+          (isIncorporator && isSent);
 
         return {
           id: tx.txid || tx.hash || tx.txID || '',

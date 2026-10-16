@@ -1250,6 +1250,11 @@
         div.className = 'tx-item';
 
         const isSent = tx.type === 'sent';
+        const isMint = tx.type === 'mint';
+        const kind = isMint ? 'minted' : (isSent ? 'sent' : 'received');
+        const icon = isMint ? 'fa-plus' : (isSent ? 'fa-arrow-up' : 'fa-arrow-down');
+        const label = isMint ? 'Minted' : (isSent ? 'Sent' : 'Received');
+        const sign = isSent ? '-' : '+';
         const date = tx.timestamp ? new Date(tx.timestamp) : null;
         const formattedDate = date
           ? date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -1263,17 +1268,17 @@
           : '';
 
         div.innerHTML = `
-          <div class="tx-icon ${isSent ? 'sent' : 'received'}">
-            <i class="fa-solid fa-arrow-${isSent ? 'up' : 'down'}"></i>
+          <div class="tx-icon ${kind}">
+            <i class="fa-solid ${icon}"></i>
           </div>
           <div class="tx-details">
-            <div class="tx-type">${isSent ? 'Sent' : 'Received'}</div>
+            <div class="tx-type">${label}</div>
             <div class="tx-address">${short}</div>
             <div class="tx-date">${formattedDate}</div>
             <div class="tx-id" title="${tx.id}">TX: ${shortTx}</div>
           </div>
-          <div class="tx-amount ${isSent ? 'sent' : 'received'}">
-            ${isSent ? '-' : '+'}${Number(tx.amount).toFixed(6)} USDAI
+          <div class="tx-amount ${kind}">
+            ${sign}${Number(tx.amount).toFixed(6)} USDAI
           </div>
         `;
 

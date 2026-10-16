@@ -3491,3 +3491,11 @@ select.form-input:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
 }
+
+.tx-icon.minted {
+    background: rgba(139, 92, 246, 0.2);
+    color: var(--accent);
+}
+.tx-amount.minted {
+    color: var(--accent);
+}
