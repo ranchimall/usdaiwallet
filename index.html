@@ -464,13 +464,6 @@
           <div id="usdai-balance-section" class="balance-info card" style="display: none">
             <div class="balance-header">
               <h3><i class="fas fa-coins"></i> USDAI Balance</h3>
-              <button
-                class="input-action-btn"
-                onclick="refreshUsdaiBalance()"
-                title="Refresh"
-              >
-                <i class="fas fa-sync-alt" id="usdai-refresh-icon"></i>
-              </button>
             </div>
             <div class="balance-display">
               <div class="balance-amount" id="usdai-balance-amount">
@@ -480,13 +473,10 @@
             <div class="address-display">
               <span class="address-label">FLO Address:</span>
               <span class="address-value" id="usdai-flo-address">-</span>
-              <button
-                class="input-action-btn clear-btn"
-                onclick="copyToClipboard('usdai-flo-address')"
-                title="Copy Address"
-              >
-                <i class="fa-regular fa-copy"></i>
-              </button>
+            </div>
+            <div class="address-display" id="usdai-minted-line" style="display: none">
+              <span class="address-label">Total minted:</span>
+              <span class="address-value" id="usdai-minted-amount">-</span>
             </div>
           </div>
 
@@ -1173,6 +1163,29 @@
         } finally {
           icon?.classList.remove('fa-spin');
         }
+        refreshMintedTotal();
+      }
+
+      // ─── Total minted line: incorporation addresses only ──────────────
+      async function refreshMintedTotal() {
+        const line = document.getElementById('usdai-minted-line');
+        const amt = document.getElementById('usdai-minted-amount');
+        if (!line || !amt || !currentUsdaiFloAddress || typeof usdaiAPI.getMintedTotal !== 'function') {
+          line && (line.style.display = 'none');
+          return;
+        }
+        try {
+          const { totalMinted } = await usdaiAPI.getMintedTotal(currentUsdaiFloAddress);
+          if (totalMinted > 0) {
+            amt.textContent =
+              `${Number(totalMinted).toLocaleString(undefined, { maximumFractionDigits: 8 })} USDAI`;
+            line.style.display = '';
+          } else {
+            line.style.display = 'none';
+          }
+        } catch {
+          line.style.display = 'none';
+        }
       }
 
       // ─── Load transaction history ────────────────────────────────────────────
@@ -1234,7 +1247,11 @@
         const el = document.getElementById('usdai-tx-history');
         let txs = allUsdaiTransactions;
         if (currentUsdaiFilter === 'sent') txs = txs.filter((t) => t.type === 'sent');
-        if (currentUsdaiFilter === 'received') txs = txs.filter((t) => t.type === 'received');
+        // Received = true inflows: plain receives plus mints that landed here 
+        if (currentUsdaiFilter === 'received') txs = txs.filter((t) =>
+          t.type === 'received' ||
+          (t.type === 'mint' && t.receiver === currentUsdaiFloAddress)
+        );
 
         if (!txs.length) {
           el.innerHTML = '<div class="tx-empty">No USDAI transactions found</div>';
