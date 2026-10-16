@@ -2,6 +2,7 @@
   'use strict';
 
   const TOKEN_API_BASE = 'https://ranchimallflo.ranchimall.net/api/v2';
+  const TOKEN_API_BASE_V1 = 'https://ranchimallflo.ranchimall.net/api/v1.0';
   const USDAI_TOKEN = 'usdai';
   const USDAI_DECIMALS = 10;
   const FLO_SEND_AMT = 0.0003;
@@ -78,6 +79,20 @@
 
     try {
       const res = await fetch(
+        `${TOKEN_API_BASE_V1}/getFloAddressBalance?token=${USDAI_TOKEN}&floAddress=${floAddress}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.result === 'ok' && Number.isFinite(Number(data.balance))) {
+          return { address: floAddress, balance: Number(data.balance) };
+        }
+      }
+    } catch (e) {
+      console.warn('canonical balance failed, using history sum:', e.message);
+    }
+
+    try {
+      const res = await fetch(
         `${TOKEN_API_BASE}/floAddressTransactions/${floAddress}?token=${USDAI_TOKEN}`
       );
       if (res.ok) {
@@ -106,6 +121,39 @@
     }
 
     return { address: floAddress, balance: 0 };
+  };
+
+  // ─── Total minted (incorporation addresses only) ─────────────────
+  // Sums creation sends. Normal addresses return 0 (and the UI hides
+  // the line), so this only ever surfaces for token issuers.
+  usdaiAPI.getMintedTotal = async function (floAddress) {
+    const empty = { address: floAddress, totalMinted: 0, mintCount: 0 };
+    try {
+      const res = await fetch(
+        `${TOKEN_API_BASE}/floAddressTransactions/${floAddress}?token=${USDAI_TOKEN}`
+      );
+      if (!res.ok) return empty;
+      const data = await res.json();
+      const txs = dedupeTxs(Array.isArray(data)
+        ? data
+        : data.transactions || data.txs || data.data || []);
+      const isIncorporator = txs.some(
+        (t) => (t.transferType || t.type) === 'infiniteTokenIncorporation'
+      );
+      if (!isIncorporator) return empty;
+      let totalMinted = 0, mintCount = 0;
+      for (const tx of txs) {
+        const sender = tx.senderAddress || tx.from || tx.sender;
+        if (sender !== floAddress) continue;
+        const amt = Number(tx.tokenAmount || tx.amount || 0);
+        if (amt === 0) continue; // setup record, not issuance
+        totalMinted += amt;
+        mintCount++;
+      }
+      return { address: floAddress, totalMinted, mintCount };
+    } catch (e) {
+      return empty;
+    }
   };
 
   // ─── Send ──────────────────────────────────────────────────────
@@ -181,10 +229,11 @@
         const dest = tx.receiverAddress || tx.to || tx.destAddress;
         const sender = tx.senderAddress || tx.from || tx.sender;
         const isSent = sender === floAddress;
+        // Mint label only in the issuer's own history: everywhere else a mint-origin receipt is just a receive (it arrived normally).
         const isMint =
-          (tx.transferType || tx.type) === 'infiniteTokenIncorporation' ||
-          (incorpAddr && sender === incorpAddr) ||
-          (isIncorporator && isSent);
+          ((tx.transferType || tx.type) === 'infiniteTokenIncorporation' ||
+            (isIncorporator && isSent)) &&
+          sender === floAddress;
 
         return {
           id: tx.txid || tx.hash || tx.txID || '',
@@ -197,7 +246,7 @@
           timestamp: normalizeTimestamp(tx.time ?? tx.timestamp ?? tx.createdAt),
           confirmations: tx.confirmations || 0,
         };
-      });
+      }).filter((t) => t.amount !== 0); // hide zero-amount records (e.g. setup rows)
 
       return {
         transactions,
