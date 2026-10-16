@@ -51,6 +51,7 @@
   // ─── Balance ───────────────────────────────────────────────────
   // NOTE: the old tokenHolders endpoint 404s — balance is summed
   // from the address transaction history (single source, always live).
+  // Token semantics: the incorporation address MINTS on send (needs no prior balance), so its sends must not be subtracted — naive math reads negative there, which the token system forbids. Final clamp enforces the no-negative invariant for every address.
   usdaiAPI.getBalance = async function (floAddress) {
     if (!usdaiAPI.isValidAddress(floAddress)) {
       throw new Error('Invalid FLO address');
@@ -65,15 +66,19 @@
         const txs = dedupeTxs(Array.isArray(data)
           ? data
           : data.transactions || data.txs || data.data || []);
+        const isIncorporation = txs.some(
+          (tx) => (tx.transferType || tx.type) === 'infiniteTokenIncorporation'
+        );
         let balance = 0;
         for (const tx of txs) {
+          if ((tx.transferType || tx.type) === 'infiniteTokenIncorporation') continue;
           const amt = Number(tx.tokenAmount || tx.amount || 0);
           const dest = tx.receiverAddress || tx.to || tx.destAddress;
           const sender = tx.senderAddress || tx.from || tx.sender;
           if (dest === floAddress) balance += amt;
-          if (sender === floAddress) balance -= amt;
+          if (sender === floAddress && !isIncorporation) balance -= amt;
         }
-        return { address: floAddress, balance };
+        return { address: floAddress, balance: Math.max(0, balance) };
       }
     } catch (e) {
       console.warn('fallback failed:', e);
@@ -144,7 +149,8 @@
         const amt = Number(tx.tokenAmount || tx.amount || 0);
         const dest = tx.receiverAddress || tx.to || tx.destAddress;
         const sender = tx.senderAddress || tx.from || tx.sender;
-        const isSent = sender === floAddress;
+        const isMint = (tx.transferType || tx.type) === 'infiniteTokenIncorporation';
+        const isSent = !isMint && sender === floAddress;
 
         return {
           id: tx.txid || tx.hash || tx.txID || '',
@@ -153,7 +159,7 @@
           receiver: dest,
           amount: amt,
           amountUsdai: amt,
-          type: isSent ? 'sent' : 'received',
+          type: isMint ? 'mint' : (isSent ? 'sent' : 'received'),
           timestamp: normalizeTimestamp(tx.time ?? tx.timestamp ?? tx.createdAt),
           confirmations: tx.confirmations || 0,
         };
